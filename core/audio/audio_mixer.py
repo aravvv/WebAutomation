@@ -1,6 +1,8 @@
 import subprocess
 from pathlib import Path
 
+from config.settings import get_ffmpeg_bin
+
 
 class AudioMixer:
     """
@@ -16,6 +18,7 @@ class AudioMixer:
         output_video_path: Path,
         game_volume_db: float = -16.0,
     ) -> Path:
+        ffmpeg_bin = get_ffmpeg_bin()
         volume_linear = 10 ** (game_volume_db / 20.0)
         filter_complex = (
             f"[0:a]volume={volume_linear:.4f}[game];"
@@ -23,7 +26,7 @@ class AudioMixer:
             f"[game][vo]amix=inputs=2:duration=first:dropout_transition=2[aout]"
         )
         cmd = [
-            "ffmpeg",
+            ffmpeg_bin,
             "-y",
             "-v",
             "error",
@@ -47,9 +50,8 @@ class AudioMixer:
         ]
         res = subprocess.run(cmd, capture_output=True)
         if res.returncode != 0:
-            # If source video had no audio track, attach voiceover directly
             fallback_cmd = [
-                "ffmpeg",
+                ffmpeg_bin,
                 "-y",
                 "-v",
                 "error",

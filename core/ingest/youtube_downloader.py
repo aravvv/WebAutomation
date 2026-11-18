@@ -12,7 +12,7 @@ from typing import Any, Dict, List, Optional
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
-from config.settings import DOWNLOADS_DIR, get_primary_font
+from config.settings import DOWNLOADS_DIR, get_ffmpeg_bin, get_primary_font, probe_media_with_ffmpeg
 
 
 @dataclass
@@ -59,6 +59,8 @@ class YouTubeDownloader:
 
     @staticmethod
     def find_yt_dlp_cmd() -> Optional[List[str]]:
+        import sys
+
         found = shutil.which("yt-dlp")
         if found:
             return [found]
@@ -66,11 +68,15 @@ class YouTubeDownloader:
         if local_bin.exists():
             return [str(local_bin)]
         try:
-            import sys
             import yt_dlp  # noqa: F401
             return [sys.executable, "-m", "yt_dlp"]
         except ImportError:
-            return None
+            try:
+                subprocess.run([sys.executable, "-m", "pip", "install", "-q", "yt-dlp"], check=False)
+                import yt_dlp  # noqa: F401
+                return [sys.executable, "-m", "yt_dlp"]
+            except Exception:
+                return None
 
     @staticmethod
     def extract_video_id(url_or_path: str) -> str:
@@ -85,28 +91,7 @@ class YouTubeDownloader:
         return clean[:24] or "gta6_source"
 
     def probe_video_stream(self, video_path: Path) -> Dict[str, Any]:
-        cmd = [
-            "ffprobe",
-            "-v",
-            "error",
-            "-select_streams",
-            "v:0",
-            "-show_entries",
-            "stream=width,height,r_frame_rate:format=duration,start_time",
-            "-of",
-            "json",
-            str(video_path),
-        ]
-        res = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", check=True)
-        data = json.loads(res.stdout)
-        stream = data.get("streams", [{}])[0]
-        fmt = data.get("format", {})
-        return {
-            "width": int(stream.get("width", 1920)),
-            "height": int(stream.get("height", 1080)),
-            "duration": float(fmt.get("duration", 0.0)),
-            "start_time": float(fmt.get("start_time", 0.0)),
-        }
+        return probe_media_with_ffmpeg(video_path)
 
     def ingest(self, url_or_path: str, use_demo_fallback: bool = False) -> IngestedVideo:
         if url_or_path.lower() in ("demo", "sample") or (
@@ -172,6 +157,7 @@ class YouTubeDownloader:
         info_json_path = self.download_dir / f"{video_id}.info.json"
         offset_meta_path = self.download_dir / f"{video_id}.offset.json"
         yt_dlp_cmd = self.find_yt_dlp_cmd()
+        ffmpeg_bin = get_ffmpeg_bin()
 
         if not yt_dlp_cmd:
             if use_demo_fallback:
@@ -179,6 +165,7 @@ class YouTubeDownloader:
             raise RuntimeError("yt-dlp not found. Run `pip install yt-dlp` to download YouTube URLs.")
 
         js_args = ["--js-runtimes", "node"] if shutil.which("node") else []
+        ffmpeg_loc_args = ["--ffmpeg-location", ffmpeg_bin] if os.path.exists(ffmpeg_bin) else []
 
         # 1. Fetch metadata JSON if not cached
         if not info_json_path.exists():
@@ -217,6 +204,7 @@ class YouTubeDownloader:
             dl_cmd = (
                 yt_dlp_cmd
                 + js_args
+                + ffmpeg_loc_args
                 + [
                     "--no-warnings",
                     "-f",
@@ -235,10 +223,53 @@ class YouTubeDownloader:
 
             dl_cmd.extend(["-o", str(self.download_dir / f"{video_id}.%(ext)s"), url])
             res = subprocess.run(dl_cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
-            if res.returncode != 0 and not output_mp4.exists():
-                if use_demo_fallback:
-                    return self.create_demo_gta6_landscape_video(video_id=video_id, source_url=url)
-                raise RuntimeError(f"yt-dlp failed to download {url}: {res.stderr}")
+            if (res.returncode != 0 or not output_mp4.exists()):
+                # Fallback for Windows systems without ffprobe (needed by --download-sections):
+                # Download progressive MP4 stream directly and trim with our bundled ffmpeg
+                raw_tmp_mp4 = self.download_dir / f"{video_id}_raw.mp4"
+                fb_cmd = (
+                    yt_dlp_cmd
+                    + js_args
+                    + ffmpeg_loc_args
+                    + [
+                        "--no-warnings",
+                        "-f",
+                        "18/best[ext=mp4]/best",
+                        "--write-subs",
+                        "--write-auto-subs",
+                        "--sub-langs",
+                        "en.*",
+                        "-o",
+                        str(raw_tmp_mp4),
+                        url,
+                    ]
+                )
+                fb_res = subprocess.run(fb_cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
+                if raw_tmp_mp4.exists():
+                    if full_duration > 180.0:
+                        trim_cmd = [
+                            ffmpeg_bin,
+                            "-y",
+                            "-v",
+                            "error",
+                            "-ss",
+                            f"{int(section_offset)}",
+                            "-t",
+                            "120",
+                            "-i",
+                            str(raw_tmp_mp4),
+                            "-c",
+                            "copy",
+                            str(output_mp4),
+                        ]
+                        subprocess.run(trim_cmd, check=False)
+                        raw_tmp_mp4.unlink(missing_ok=True)
+                    else:
+                        raw_tmp_mp4.rename(output_mp4)
+                elif not output_mp4.exists():
+                    if use_demo_fallback:
+                        return self.create_demo_gta6_landscape_video(video_id=video_id, source_url=url)
+                    raise RuntimeError(f"yt-dlp failed to download {url}: {fb_res.stderr or res.stderr}")
             offset_meta_path.write_text(json.dumps({"section_offset": section_offset}), encoding="utf-8")
 
         stream_info = self.probe_video_stream(output_mp4)
@@ -533,7 +564,7 @@ class YouTubeDownloader:
         sub_font = ImageFont.truetype(get_primary_font(), 36)
 
         cmd = [
-            "ffmpeg",
+            get_ffmpeg_bin(),
             "-y",
             "-f",
             "rawvideo",

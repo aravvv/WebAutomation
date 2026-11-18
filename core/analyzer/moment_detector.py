@@ -6,7 +6,7 @@ from typing import Dict, List
 import numpy as np
 import yaml
 
-from config.settings import DEFAULT_CLIP_DURATION, PRESETS_PATH
+from config.settings import DEFAULT_CLIP_DURATION, PRESETS_PATH, get_ffmpeg_bin
 from core.ingest.youtube_downloader import IngestedVideo
 
 
@@ -158,7 +158,7 @@ class CrazyMomentDetector:
         arr = np.zeros(total_sec, dtype=np.float32)
         sample_rate = 8000
         cmd = [
-            "ffmpeg",
+            get_ffmpeg_bin(),
             "-v",
             "error",
             "-i",
@@ -192,7 +192,7 @@ class CrazyMomentDetector:
         w, h, fps = 160, 90, 4
         frame_bytes = w * h
         cmd = [
-            "ffmpeg",
+            get_ffmpeg_bin(),
             "-v",
             "error",
             "-i",

@@ -5,6 +5,7 @@ from typing import List, Optional
 
 import numpy as np
 
+from config.settings import get_ffmpeg_bin
 from core.ingest.youtube_downloader import IngestedVideo
 
 
@@ -152,7 +153,7 @@ class AudioTranscriber:
         sample_rate = 16000
         hop = sample_rate // 100  # 160 samples = 10ms
         cmd = [
-            "ffmpeg",
+            get_ffmpeg_bin(),
             "-v",
             "error",
             "-ss",

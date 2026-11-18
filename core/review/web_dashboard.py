@@ -51,53 +51,70 @@ def get_status():
 
 @app.post("/api/clip")
 def trigger_clip_job(req: ClipRequest):
-    top_n = max(1, min(10, int(req.top_n)))
-    clip_dur = max(10.0, min(58.0, float(req.clip_duration)))
-    ingested = downloader.ingest(req.url.strip(), use_demo_fallback=True)
-    moments = detector.detect_top_moments(ingested, top_n=top_n, clip_duration=clip_dur)
-    rendered_ids = []
-    for m in moments:
-        short = compositor.render_short(ingested, m, audio_mode=req.audio_mode)
-        tracker.save_rendered_short(short, source_url=ingested.source_url)
-        rendered_ids.append(short.clip_id)
-    return {
-        "status": "ok",
-        "video_title": ingested.title,
-        "rendered_clip_ids": rendered_ids,
-        "clips": tracker.list_clips(),
-    }
+    import traceback
+    from fastapi.responses import JSONResponse
+
+    try:
+        top_n = max(1, min(10, int(req.top_n)))
+        clip_dur = max(10.0, min(58.0, float(req.clip_duration)))
+        ingested = downloader.ingest(req.url.strip(), use_demo_fallback=False)
+        moments = detector.detect_top_moments(ingested, top_n=top_n, clip_duration=clip_dur)
+        rendered_ids = []
+        for m in moments:
+            short = compositor.render_short(ingested, m, audio_mode=req.audio_mode)
+            tracker.save_rendered_short(short, source_url=ingested.source_url)
+            rendered_ids.append(short.clip_id)
+        return {
+            "status": "ok",
+            "video_title": ingested.title,
+            "rendered_clip_ids": rendered_ids,
+            "clips": tracker.list_clips(),
+        }
+    except Exception as exc:
+        return JSONResponse(
+            status_code=500,
+            content={"error": str(exc), "details": traceback.format_exc()},
+        )
 
 
 @app.post("/api/reburn")
 def reburn_clip_hook(req: ReburnHookRequest):
-    clip = tracker.get_clip(req.clip_id)
-    if not clip:
-        raise HTTPException(status_code=404, detail=f"Clip {req.clip_id} not found")
+    import traceback
+    from fastapi.responses import JSONResponse
 
-    ingested = downloader.ingest(clip["source_url"], use_demo_fallback=True)
-    moment = CrazyMoment(
-        rank=1,
-        start_time=float(clip["start_time"]),
-        end_time=float(clip["end_time"]),
-        viral_score=float(clip["viral_score"]),
-        category="action_peak",
-        reason=str(clip["reason"]),
-        transcript_excerpt="",
-    )
-    short = compositor.render_short(
-        video=ingested,
-        moment=moment,
-        audio_mode=clip["audio_mode"],
-        custom_hook_text=req.custom_hook,
-    )
-    # Copy over the existing clip_id file path so the player reloads it seamlessly
-    target_path = Path(clip["output_path"])
-    if short.output_path != target_path and short.output_path.exists():
-        target_path.write_bytes(short.output_path.read_bytes())
+    try:
+        clip = tracker.get_clip(req.clip_id)
+        if not clip:
+            raise HTTPException(status_code=404, detail=f"Clip {req.clip_id} not found")
 
-    new_title = req.selected_title or f"{req.custom_hook} #gta6 #shorts"
-    tracker.update_clip_selection(req.clip_id, req.custom_hook, new_title)
-    return {"status": "ok", "clip_id": req.clip_id, "hook": req.custom_hook}
+        ingested = downloader.ingest(clip["source_url"], use_demo_fallback=True)
+        moment = CrazyMoment(
+            rank=1,
+            start_time=float(clip["start_time"]),
+            end_time=float(clip["end_time"]),
+            viral_score=float(clip["viral_score"]),
+            category="action_peak",
+            reason=str(clip["reason"]),
+            transcript_excerpt="",
+        )
+        short = compositor.render_short(
+            video=ingested,
+            moment=moment,
+            audio_mode=clip["audio_mode"],
+            custom_hook_text=req.custom_hook,
+        )
+        target_path = Path(clip["output_path"])
+        if short.output_path != target_path and short.output_path.exists():
+            target_path.write_bytes(short.output_path.read_bytes())
+
+        new_title = req.selected_title or f"{req.custom_hook} #gta6 #shorts"
+        tracker.update_clip_selection(req.clip_id, req.custom_hook, new_title)
+        return {"status": "ok", "clip_id": req.clip_id, "hook": req.custom_hook}
+    except Exception as exc:
+        return JSONResponse(
+            status_code=500,
+            content={"error": str(exc), "details": traceback.format_exc()},
+        )
 
 
 @app.post("/api/publish")
@@ -253,7 +270,7 @@ def studio_index():
         const data = await res.json();
         const q = data.quota;
         document.getElementById('quotaBox').innerHTML =
-          `YouTube Free Daily Quota: <strong>${q.remaining_units} / ${q.daily_limit}</strong> units left (<strong>${q.uploads_remaining_today}</strong> free Shorts uploads available today)`;
+          `⚡ Local 9:16 Clipping: <strong>UNLIMITED (100% Free)</strong> &nbsp;|&nbsp; Auto-Upload API: <strong>${q.uploads_remaining_today}</strong>/day`;
         renderClips(data.clips);
       } catch (err) {
         const errBox = document.getElementById('errorBanner');

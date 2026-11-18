@@ -1,10 +1,11 @@
 import asyncio
-import json
 import subprocess
 import wave
 from pathlib import Path
 
 import numpy as np
+
+from config.settings import get_ffmpeg_bin, probe_media_with_ffmpeg
 
 
 class VoiceSynthesizer:
@@ -43,19 +44,9 @@ class VoiceSynthesizer:
 
     @staticmethod
     def get_audio_duration(audio_path: Path) -> float:
-        cmd = [
-            "ffprobe",
-            "-v",
-            "error",
-            "-show_entries",
-            "format=duration",
-            "-of",
-            "json",
-            str(audio_path),
-        ]
         try:
-            res = subprocess.run(cmd, capture_output=True, text=True, check=True)
-            return float(json.loads(res.stdout).get("format", {}).get("duration", 10.0))
+            info = probe_media_with_ffmpeg(audio_path)
+            return float(info.get("duration") or 10.0)
         except Exception:
             return 10.0
 
@@ -65,7 +56,6 @@ class VoiceSynthesizer:
         words = max(1, len(text.split()))
         dur = max(3.0, min(duration, words / 2.6))
         t = np.linspace(0, dur, int(sample_rate * dur), endpoint=False)
-        # Syllable cadence envelope
         syllable_env = 0.5 + 0.5 * np.sin(2 * np.pi * 4.2 * t)
         voice_sig = (
             0.6 * np.sin(2 * np.pi * 135 * t)
@@ -82,7 +72,7 @@ class VoiceSynthesizer:
             wf.writeframes(pcm.tobytes())
 
         subprocess.run(
-            ["ffmpeg", "-y", "-v", "error", "-i", str(wav_tmp), str(output_path)],
+            [get_ffmpeg_bin(), "-y", "-v", "error", "-i", str(wav_tmp), str(output_path)],
             check=True,
         )
         if wav_tmp.exists():
