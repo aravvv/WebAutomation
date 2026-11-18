@@ -1,0 +1,12 @@
+.venv/
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+storage/downloads/
+storage/renders/
+storage/temp/
+storage/*.db
+client_secrets.json
+token.json
+.env

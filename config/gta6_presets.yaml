@@ -1,0 +1,106 @@
+# GTA 6 Viral Shorts Hook Templates, Hype Triggers & Hashtag Presets
+
+hype_keywords:
+  high_impact:
+    - "insane"
+    - "crazy"
+    - "unbelievable"
+    - "look at this"
+    - "look at that"
+    - "wait for it"
+    - "no way"
+    - "secret"
+    - "hidden detail"
+    - "physics"
+    - "graphics"
+    - "realistic"
+    - "lucia"
+    - "jason"
+    - "vice city"
+    - "leonida"
+    - "rockstar"
+    - "gta 6"
+    - "gta vi"
+    - "explosion"
+    - "police chase"
+    - "alligator"
+    - "npc"
+    - "water physics"
+  medium_impact:
+    - "next gen"
+    - "trailer"
+    - "leak"
+    - "gameplay"
+    - "comparison"
+    - "gta 5"
+    - "detail"
+    - "notice"
+    - "missed"
+    - "wild"
+    - "moment"
+
+viral_hook_templates:
+  action_peak:
+    - "WAIT TIL YOU SEE THIS GTA 6 MOMENT 💀"
+    - "GTA 6 ACTION IS ACTUALLY UNREAL 🔥"
+    - "NOBODY EXPECTED THIS TO HAPPEN IN GTA 6 😱"
+    - "ROCKSTAR WENT TOO FAR WITH THIS GTA 6 SCENE 💀"
+    - "THIS 3-SECOND GTA 6 CLIP BROKE THE INTERNET 🚨"
+  detail_discovery:
+    - "99% OF PLAYERS MISSED THIS GTA 6 DETAIL 🤯"
+    - "ZOOM IN ON THIS CRAZY GTA 6 DETAIL 👀"
+    - "GTA 6 NPC AI IS GETTING SCARY REALISTIC 💀"
+    - "ROCKSTAR HID THIS SECRET IN PLAIN SIGHT 🔥"
+    - "GTA 6 PHYSICS JUST KILLED EVERY OTHER GAME 🏆"
+  hype_reaction:
+    - "BRO THIS GTA 6 LEAK/TRAILER MOMENT IS INSANE 😭"
+    - "HOW IS GTA 6 EVEN RUNNING ON CONSOLES?! 🤯"
+    - "GTA 5 VS GTA 6 IS NOT EVEN CLOSE ANYMORE 🔥"
+    - "WAIT UNTIL THE END OF THIS GTA 6 CLIP... 👀"
+    - "VICE CITY IN GTA 6 LOOKS LIKE REAL LIFE 🌴"
+
+youtube_title_templates:
+  - "{hook} #gta6 #shorts"
+  - "Nobody noticed this crazy detail in GTA 6... 🤯 ({topic}) #gta6 #shorts"
+  - "Rockstar went INSANE with this in GTA 6 💀 #gta6 #gaming #shorts"
+  - "Wait until you see what happens in this GTA 6 clip 🔥 #gta6 #shorts"
+  - "Why GTA 6 is going to break every record 🚨 ({topic}) #gta6 #shorts"
+
+ai_commentary_templates:
+  - "Stop scrolling! Look closely at what happens right here in GTA 6. Notice how insane the physics and environmental reactions are in Vice City. Rockstar spent years perfecting tiny details like this, and 99 percent of people completely missed it on their first watch. Drop a comment if you caught this!"
+  - "Hold up, this GTA 6 moment is actually wild! Watch the background right as the action peaks. The level of realism in Leonida is unlike anything we have ever seen in gaming history. Do you think consoles can handle this at 60 FPS? Subscribe for daily GTA 6 secrets!"
+  - "You have to see this crazy GTA 6 detail before everyone else! Look at how dynamic the NPCs and lighting react in real time. Rockstar Games is truly building a living breathing world. Hit subscribe if you cannot wait for GTA 6!"
+
+hashtag_packs:
+  core_gta6:
+    - "#gta6"
+    - "#gta"
+    - "#grandtheftauto6"
+    - "#rockstargames"
+    - "#gtashorts"
+    - "#shorts"
+  viral_gaming:
+    - "#gta6trailer"
+    - "#vicecity"
+    - "#gtavi"
+    - "#gaming"
+    - "#gamingcommunity"
+    - "#viral"
+  detail_focus:
+    - "#gta6details"
+    - "#gta6gameplay"
+    - "#gta5"
+    - "#playstation5"
+    - "#xbox"
+
+default_tags:
+  - "GTA 6"
+  - "GTA VI"
+  - "Grand Theft Auto 6"
+  - "GTA 6 Shorts"
+  - "GTA 6 Crazy Details"
+  - "GTA 6 Trailer Breakdown"
+  - "Vice City"
+  - "Rockstar Games"
+  - "GTA 6 Gameplay"
+  - "Gaming Shorts"
