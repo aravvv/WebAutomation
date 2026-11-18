@@ -26,7 +26,11 @@ def cmd_clip(args: argparse.Namespace) -> None:
 
     source_target = "demo" if args.demo else args.url
     print(f"\n[1/4] Ingesting GTA 6 video source: {source_target} ...")
-    video = downloader.ingest(source_target, use_demo_fallback=args.demo)
+    video = downloader.ingest(
+        source_target,
+        use_demo_fallback=args.demo,
+        cookies_browser=getattr(args, "cookies_browser", "auto"),
+    )
     print(
         f"      Loaded: '{video.title}' ({video.width}x{video.height} landscape, "
         f"duration={video.duration:.1f}s, heatmap_points={len(video.heatmap)})"
@@ -150,6 +154,12 @@ def main() -> None:
         help="Keep original audio + captions ('original') or add AI hype commentary ('ai-voiceover')",
     )
     p_clip.add_argument("--static-center", action="store_true", help="Disable dynamic horizontal action tracking")
+    p_clip.add_argument(
+        "--cookies-browser",
+        type=str,
+        default="auto",
+        help="Browser for 18+ age-restricted YouTube cookies ('auto', 'cookies_txt', 'firefox', 'edge', 'chrome', 'brave')",
+    )
     p_clip.add_argument("--auto-publish", action="store_true", help="Immediately publish rendered Shorts to YouTube")
     p_clip.add_argument("--privacy", choices=["public", "unlisted", "private"], default="public")
     p_clip.add_argument("--dry-run", action="store_true", help="Simulate YouTube API upload")

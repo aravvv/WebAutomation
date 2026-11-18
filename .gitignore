@@ -11,4 +11,6 @@ storage/temp/
 storage/*.db
 client_secrets.json
 token.json
+cookies.txt
+storage/cookies.txt
 .env

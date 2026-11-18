@@ -12,7 +12,13 @@ from typing import Any, Dict, List, Optional
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
-from config.settings import DOWNLOADS_DIR, get_ffmpeg_bin, get_primary_font, probe_media_with_ffmpeg
+from config.settings import (
+    COOKIES_FILE,
+    DOWNLOADS_DIR,
+    get_ffmpeg_bin,
+    get_primary_font,
+    probe_media_with_ffmpeg,
+)
 
 
 @dataclass
@@ -51,6 +57,7 @@ class YouTubeDownloader:
       - Exact millisecond word-level captions from YouTube's WebVTT `<c>` stream
       - YouTube's 'Most Replayed' retention heatmap & chapters
       - Zero-drift section downloading for long videos
+      - Official yt-dlp authentication (--cookies and --cookies-from-browser) for 18+ age-restricted GTA 6 videos
     """
 
     def __init__(self, download_dir: Path = DOWNLOADS_DIR):
@@ -93,7 +100,12 @@ class YouTubeDownloader:
     def probe_video_stream(self, video_path: Path) -> Dict[str, Any]:
         return probe_media_with_ffmpeg(video_path)
 
-    def ingest(self, url_or_path: str, use_demo_fallback: bool = False) -> IngestedVideo:
+    def ingest(
+        self,
+        url_or_path: str,
+        use_demo_fallback: bool = False,
+        cookies_browser: Optional[str] = None,
+    ) -> IngestedVideo:
         if url_or_path.lower() in ("demo", "sample") or (
             use_demo_fallback and not os.path.exists(url_or_path) and not self._is_yt_dlp_available()
         ):
@@ -103,7 +115,11 @@ class YouTubeDownloader:
         if local_candidate.exists() and local_candidate.is_file():
             return self._ingest_local_file(local_candidate)
 
-        return self._download_from_youtube(url_or_path, use_demo_fallback=use_demo_fallback)
+        return self._download_from_youtube(
+            url_or_path,
+            use_demo_fallback=use_demo_fallback,
+            cookies_browser=cookies_browser,
+        )
 
     def _is_yt_dlp_available(self) -> bool:
         return self.find_yt_dlp_cmd() is not None
@@ -151,7 +167,52 @@ class YouTubeDownloader:
             transcript=transcript,
         )
 
-    def _download_from_youtube(self, url: str, use_demo_fallback: bool = False) -> IngestedVideo:
+    @staticmethod
+    def _clean_yt_dlp_stderr(stderr_text: str) -> str:
+        lines = []
+        for line in (stderr_text or "").splitlines():
+            if "Deprecated Feature: Support for Python version 3.10" in line:
+                continue
+            if line.strip():
+                lines.append(line.strip())
+        return "\n".join(lines)
+
+    @staticmethod
+    def _find_cookies_file() -> Optional[Path]:
+        for candidate in (COOKIES_FILE, Path("cookies.txt")):
+            if candidate.exists() and candidate.is_file() and candidate.stat().st_size > 20:
+                return candidate
+        return None
+
+    def _build_cookie_arg_attempts(self, cookies_browser: Optional[str] = None) -> List[List[str]]:
+        cookies_txt = self._find_cookies_file()
+        attempts: List[List[str]] = []
+
+        browser_choice = (cookies_browser or "auto").strip().lower()
+        if browser_choice in ("firefox", "edge", "chrome", "brave", "opera", "vivaldi"):
+            attempts.append(["--cookies-from-browser", browser_choice])
+            if cookies_txt:
+                attempts.append(["--cookies", str(cookies_txt)])
+        elif browser_choice == "cookies_txt" and cookies_txt:
+            attempts.append(["--cookies", str(cookies_txt)])
+        else:
+            if cookies_txt:
+                attempts.append(["--cookies", str(cookies_txt)])
+            attempts.append([])
+
+        # Fallback attempts if YouTube returns an 18+ age-restriction gate
+        for b in ("firefox", "edge", "brave", "chrome"):
+            arg = ["--cookies-from-browser", b]
+            if arg not in attempts:
+                attempts.append(arg)
+        return attempts
+
+    def _download_from_youtube(
+        self,
+        url: str,
+        use_demo_fallback: bool = False,
+        cookies_browser: Optional[str] = None,
+    ) -> IngestedVideo:
         video_id = self.extract_video_id(url)
         output_mp4 = self.download_dir / f"{video_id}.mp4"
         info_json_path = self.download_dir / f"{video_id}.info.json"
@@ -166,15 +227,24 @@ class YouTubeDownloader:
 
         js_args = ["--js-runtimes", "node"] if shutil.which("node") else []
         ffmpeg_loc_args = ["--ffmpeg-location", ffmpeg_bin] if os.path.exists(ffmpeg_bin) else []
+        cookie_attempts = self._build_cookie_arg_attempts(cookies_browser)
+        active_cookie_args: List[str] = cookie_attempts[0]
 
-        # 1. Fetch metadata JSON if not cached
+        # 1. Fetch metadata JSON if not cached (retrying with cookies if 18+ age-restricted)
         if not info_json_path.exists():
-            meta_cmd = yt_dlp_cmd + js_args + ["--dump-single-json", "--no-warnings", url]
-            meta_res = subprocess.run(
-                meta_cmd, capture_output=True, text=True, encoding="utf-8", errors="replace"
-            )
-            if meta_res.returncode == 0 and meta_res.stdout.strip():
-                info_json_path.write_text(meta_res.stdout, encoding="utf-8")
+            for idx, c_args in enumerate(cookie_attempts):
+                meta_cmd = yt_dlp_cmd + js_args + c_args + ["--dump-single-json", "--no-warnings", url]
+                meta_res = subprocess.run(
+                    meta_cmd, capture_output=True, text=True, encoding="utf-8", errors="replace"
+                )
+                if meta_res.returncode == 0 and meta_res.stdout.strip():
+                    info_json_path.write_text(meta_res.stdout, encoding="utf-8")
+                    active_cookie_args = c_args
+                    break
+                err_lower = (meta_res.stderr or "").lower()
+                # Only continue trying browser cookie fallbacks if the video is age-restricted / requires login
+                if idx == 0 and "confirm your age" not in err_lower and "sign in" not in err_lower and "cookies" not in err_lower:
+                    break
 
         info_dict = (
             json.loads(info_json_path.read_text(encoding="utf-8", errors="ignore"))
@@ -201,75 +271,115 @@ class YouTubeDownloader:
 
         # 3. Download video (for >180s videos, grab 120s window starting at section_offset)
         if not output_mp4.exists():
-            dl_cmd = (
-                yt_dlp_cmd
-                + js_args
-                + ffmpeg_loc_args
-                + [
-                    "--no-warnings",
-                    "-f",
-                    "bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[height<=1080][ext=mp4]/18/best",
-                    "--merge-output-format",
-                    "mp4",
-                    "--write-subs",
-                    "--write-auto-subs",
-                    "--sub-langs",
-                    "en.*",
-                ]
-            )
-            if full_duration > 180.0:
-                sec_end = min(full_duration, section_offset + 120.0)
-                dl_cmd.extend(["--download-sections", f"*{int(section_offset)}-{int(sec_end)}"])
+            # Build ordered cookie attempts starting with whichever succeeded for metadata
+            dl_cookie_attempts = [active_cookie_args] + [
+                c for c in cookie_attempts if c != active_cookie_args
+            ]
+            last_error_text = ""
+            saw_age_gate = False
 
-            dl_cmd.extend(["-o", str(self.download_dir / f"{video_id}.%(ext)s"), url])
-            res = subprocess.run(dl_cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
-            if (res.returncode != 0 or not output_mp4.exists()):
-                # Fallback for Windows systems without ffprobe (needed by --download-sections):
-                # Download progressive MP4 stream directly and trim with our bundled ffmpeg
-                raw_tmp_mp4 = self.download_dir / f"{video_id}_raw.mp4"
-                fb_cmd = (
+            for idx, c_args in enumerate(dl_cookie_attempts):
+                dl_cmd = (
                     yt_dlp_cmd
                     + js_args
                     + ffmpeg_loc_args
+                    + c_args
                     + [
                         "--no-warnings",
                         "-f",
-                        "18/best[ext=mp4]/best",
+                        "bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[height<=1080][ext=mp4]/18/best",
+                        "--merge-output-format",
+                        "mp4",
                         "--write-subs",
                         "--write-auto-subs",
                         "--sub-langs",
                         "en.*",
-                        "-o",
-                        str(raw_tmp_mp4),
-                        url,
                     ]
                 )
-                fb_res = subprocess.run(fb_cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
-                if raw_tmp_mp4.exists():
-                    if full_duration > 180.0:
-                        trim_cmd = [
-                            ffmpeg_bin,
-                            "-y",
-                            "-v",
-                            "error",
-                            "-ss",
-                            f"{int(section_offset)}",
-                            "-t",
-                            "120",
-                            "-i",
+                if full_duration > 180.0:
+                    sec_end = min(full_duration, section_offset + 120.0)
+                    dl_cmd.extend(["--download-sections", f"*{int(section_offset)}-{int(sec_end)}"])
+
+                dl_cmd.extend(["-o", str(self.download_dir / f"{video_id}.%(ext)s"), url])
+                res = subprocess.run(dl_cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
+                if res.returncode == 0 and output_mp4.exists():
+                    break
+
+                err_clean = self._clean_yt_dlp_stderr(res.stderr)
+                if "confirm your age" in err_clean.lower() or "age-restricted" in err_clean.lower():
+                    saw_age_gate = True
+
+                # Fallback for Windows systems without ffprobe (needed by --download-sections):
+                # Download progressive MP4 stream directly and trim with our bundled ffmpeg
+                if "confirm your age" not in err_clean.lower() and "could not copy" not in err_clean.lower() and "failed to decrypt" not in err_clean.lower():
+                    raw_tmp_mp4 = self.download_dir / f"{video_id}_raw.mp4"
+                    fb_cmd = (
+                        yt_dlp_cmd
+                        + js_args
+                        + ffmpeg_loc_args
+                        + c_args
+                        + [
+                            "--no-warnings",
+                            "-f",
+                            "18/best[ext=mp4]/best",
+                            "--write-subs",
+                            "--write-auto-subs",
+                            "--sub-langs",
+                            "en.*",
+                            "-o",
                             str(raw_tmp_mp4),
-                            "-c",
-                            "copy",
-                            str(output_mp4),
+                            url,
                         ]
-                        subprocess.run(trim_cmd, check=False)
-                        raw_tmp_mp4.unlink(missing_ok=True)
-                    else:
-                        raw_tmp_mp4.rename(output_mp4)
-                elif not output_mp4.exists():
-                    if use_demo_fallback:
-                        return self.create_demo_gta6_landscape_video(video_id=video_id, source_url=url)
-                    raise RuntimeError(f"yt-dlp failed to download {url}: {fb_res.stderr or res.stderr}")
+                    )
+                    fb_res = subprocess.run(fb_cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
+                    fb_err = self._clean_yt_dlp_stderr(fb_res.stderr)
+                    if "confirm your age" in fb_err.lower():
+                        saw_age_gate = True
+                    if raw_tmp_mp4.exists():
+                        if full_duration > 180.0:
+                            trim_cmd = [
+                                ffmpeg_bin,
+                                "-y",
+                                "-v",
+                                "error",
+                                "-ss",
+                                f"{int(section_offset)}",
+                                "-t",
+                                "120",
+                                "-i",
+                                str(raw_tmp_mp4),
+                                "-c",
+                                "copy",
+                                str(output_mp4),
+                            ]
+                            subprocess.run(trim_cmd, check=False)
+                            raw_tmp_mp4.unlink(missing_ok=True)
+                        else:
+                            raw_tmp_mp4.rename(output_mp4)
+                        if output_mp4.exists():
+                            break
+                    last_error_text = fb_err or err_clean
+                else:
+                    last_error_text = err_clean
+
+                # If it didn't fail due to age restriction or cookies, no need to cycle through other browsers
+                if not saw_age_gate and idx == 0 and not c_args:
+                    break
+
+            if not output_mp4.exists():
+                if use_demo_fallback:
+                    return self.create_demo_gta6_landscape_video(video_id=video_id, source_url=url)
+                if saw_age_gate:
+                    raise RuntimeError(
+                        f"YouTube 18+ Age-Restricted Video ({video_id}: 'Sign in to confirm your age').\n"
+                        "Many GTA 6 videos are marked 18+ by YouTube and require a signed-in 18+ cookie.\n"
+                        "👉 Fix in 15 seconds right in this Studio:\n"
+                        "  1) Click the [🔑 18+ YouTube Cookies.txt] button above and paste/upload your YouTube cookies.txt "
+                        "(export with the free 'Get cookies.txt LOCALLY' browser extension — works forever even while Chrome/Edge is open!), OR\n"
+                        "  2) Click [📁 Or Upload Local .MP4] above to select a downloaded .mp4 file from your PC!"
+                    )
+                raise RuntimeError(f"yt-dlp failed to download {url}: {last_error_text}")
+
             offset_meta_path.write_text(json.dumps({"section_offset": section_offset}), encoding="utf-8")
 
         stream_info = self.probe_video_stream(output_mp4)

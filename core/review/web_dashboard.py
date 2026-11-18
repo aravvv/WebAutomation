@@ -1,11 +1,12 @@
+import re
 from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel
 
-from config.settings import DOWNLOADS_DIR, RENDERS_DIR
+from config.settings import COOKIES_FILE, DOWNLOADS_DIR, RENDERS_DIR
 from core.analyzer.moment_detector import CrazyMoment, CrazyMomentDetector
 from core.ingest.youtube_downloader import YouTubeDownloader
 from core.publishers.quota_tracker import QuotaAndClipTracker
@@ -25,6 +26,11 @@ class ClipRequest(BaseModel):
     top_n: int = 2
     clip_duration: float = 28.0
     audio_mode: str = "original"
+    cookies_browser: str = "auto"
+
+
+class CookiesSaveRequest(BaseModel):
+    cookies_text: str
 
 
 class ReburnHookRequest(BaseModel):
@@ -43,10 +49,40 @@ class PublishRequest(BaseModel):
 
 @app.get("/api/status")
 def get_status():
+    has_cookies = COOKIES_FILE.exists() and COOKIES_FILE.is_file() and COOKIES_FILE.stat().st_size > 20
     return {
         "quota": tracker.get_remaining_quota(),
         "clips": tracker.list_clips(),
+        "has_cookies_txt": has_cookies,
     }
+
+
+@app.post("/api/cookies")
+def save_cookies_txt(req: CookiesSaveRequest):
+    content = (req.cookies_text or "").strip()
+    if not content:
+        if COOKIES_FILE.exists():
+            COOKIES_FILE.unlink()
+        return {"status": "cleared", "has_cookies_txt": False}
+    if "# Netscape HTTP Cookie File" not in content:
+        content = "# Netscape HTTP Cookie File\n" + content
+    COOKIES_FILE.write_text(content + "\n", encoding="utf-8")
+    return {"status": "saved", "has_cookies_txt": True, "path": str(COOKIES_FILE)}
+
+
+@app.post("/api/upload-video")
+async def upload_local_video(request: Request):
+    raw_name = request.headers.get("x-filename", "local_gta6_video.mp4")
+    safe_stem = re.sub(r"[^A-Za-z0-9_-]", "_", Path(raw_name).stem)[:32] or "local_gta6_video"
+    ext = Path(raw_name).suffix.lower()
+    if ext not in (".mp4", ".mkv", ".webm", ".mov"):
+        ext = ".mp4"
+    dest_path = DOWNLOADS_DIR / f"{safe_stem}{ext}"
+    body = await request.body()
+    if not body:
+        raise HTTPException(status_code=400, detail="Empty video file uploaded")
+    dest_path.write_bytes(body)
+    return {"status": "ok", "local_path": str(dest_path), "filename": dest_path.name}
 
 
 @app.post("/api/clip")
@@ -57,7 +93,11 @@ def trigger_clip_job(req: ClipRequest):
     try:
         top_n = max(1, min(10, int(req.top_n)))
         clip_dur = max(10.0, min(58.0, float(req.clip_duration)))
-        ingested = downloader.ingest(req.url.strip(), use_demo_fallback=False)
+        ingested = downloader.ingest(
+            req.url.strip(),
+            use_demo_fallback=False,
+            cookies_browser=req.cookies_browser,
+        )
         moments = detector.detect_top_moments(ingested, top_n=top_n, clip_duration=clip_dur)
         rendered_ids = []
         for m in moments:
@@ -187,19 +227,23 @@ def studio_index():
     /* Generator Form Panel */
     .generator-panel { background: linear-gradient(145deg, var(--card), var(--card-alt)); border: 1px solid var(--pink); border-radius: 18px; padding: 20px; margin-bottom: 28px; box-shadow: 0 8px 30px rgba(255, 45, 145, 0.12); }
     .generator-title { font-size: 0.95rem; font-weight: 800; color: var(--gold); margin-bottom: 14px; text-transform: uppercase; letter-spacing: 0.6px; }
-    .form-row { display: grid; grid-template-columns: 1fr 150px 150px 230px auto; gap: 12px; align-items: end; }
-    @media (max-width: 980px) { .form-row { grid-template-columns: 1fr 1fr; } }
-    .field label { display: block; font-size: 0.76rem; text-transform: uppercase; color: var(--muted); margin-bottom: 6px; font-weight: 700; }
-    .field input, .field select { width: 100%; background: #0e0b1a; border: 1px solid var(--border); color: var(--text); padding: 11px 13px; border-radius: 10px; font-size: 0.92rem; }
-    .btn { background: linear-gradient(90deg, var(--pink), #ff6a00); color: #fff; border: none; padding: 12px 22px; border-radius: 10px; font-weight: 800; cursor: pointer; font-size: 0.92rem; transition: opacity 0.15s; white-space: nowrap; }
+    .form-row { display: grid; grid-template-columns: 1fr 110px 135px 215px 185px auto; gap: 11px; align-items: end; }
+    @media (max-width: 1150px) { .form-row { grid-template-columns: 1fr 1fr; } }
+    .field label { display: block; font-size: 0.75rem; text-transform: uppercase; color: var(--muted); margin-bottom: 6px; font-weight: 700; }
+    .field input, .field select, textarea { width: 100%; background: #0e0b1a; border: 1px solid var(--border); color: var(--text); padding: 11px 12px; border-radius: 10px; font-size: 0.9rem; }
+    .btn { background: linear-gradient(90deg, var(--pink), #ff6a00); color: #fff; border: none; padding: 12px 20px; border-radius: 10px; font-weight: 800; cursor: pointer; font-size: 0.92rem; transition: opacity 0.15s; white-space: nowrap; }
     .btn:hover { opacity: 0.92; }
     .btn:disabled { opacity: 0.5; cursor: wait; }
-    .btn-secondary { background: #261f47; border: 1px solid var(--border); padding: 9px 14px; font-size: 0.82rem; border-radius: 8px; color: var(--cyan); font-weight: 700; cursor: pointer; text-decoration: none; display: inline-block; }
+    .btn-secondary { background: #261f47; border: 1px solid var(--border); padding: 8px 13px; font-size: 0.81rem; border-radius: 8px; color: var(--cyan); font-weight: 700; cursor: pointer; text-decoration: none; display: inline-block; }
     .btn-publish { background: linear-gradient(90deg, #00c853, #00bfa5); width: 100%; margin-top: 12px; padding: 12px; }
+
+    .helper-bar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 12px; padding-top: 12px; border-top: 1px dashed var(--border); }
+    .cookies-drawer { display: none; margin-top: 12px; background: #100d1e; border: 1px solid var(--gold); border-radius: 12px; padding: 14px; }
+    .cookies-drawer p { font-size: 0.83rem; color: var(--muted); margin-bottom: 8px; line-height: 1.45; }
 
     /* Progress & Error Banners */
     #jobStatus { display: none; margin-top: 14px; padding: 12px 16px; border-radius: 10px; background: rgba(0, 240, 255, 0.1); border: 1px solid var(--cyan); color: var(--cyan); font-weight: 700; font-size: 0.9rem; }
-    #errorBanner { display: none; margin-top: 14px; padding: 12px 16px; border-radius: 10px; background: rgba(255, 45, 145, 0.15); border: 1px solid var(--pink); color: #ff80b5; font-weight: 700; font-size: 0.88rem; white-space: pre-wrap; }
+    #errorBanner { display: none; margin-top: 14px; padding: 12px 16px; border-radius: 10px; background: rgba(255, 45, 145, 0.15); border: 1px solid var(--pink); color: #ff80b5; font-weight: 700; font-size: 0.88rem; white-space: pre-wrap; line-height: 1.5; }
 
     /* Clips Grid */
     .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(620px, 1fr)); gap: 22px; }
@@ -225,14 +269,14 @@ def studio_index():
       <h1>GTA VI VIRAL SHORTS CLIPPER & AUTO-PUBLISHER</h1>
       <p>Millisecond WebVTT + VAD Karaoke Subtitles • True Full-Bleed 9:16 Portrait (1080x1920) • Crazy Hooks & Hashtags</p>
     </div>
-    <div class="quota-pill" id="quotaBox">Loading free YouTube API quota...</div>
+    <div class="quota-pill" id="quotaBox">Loading Studio Status...</div>
   </header>
 
   <section class="generator-panel">
-    <div class="generator-title">⚡ Paste Any GTA 6 YouTube Video Link & Choose How Many 9:16 Clips You Want</div>
+    <div class="generator-title">⚡ Paste Any GTA 6 YouTube Video Link (or Upload Local MP4) & Choose How Many 9:16 Clips You Want</div>
     <div class="form-row">
       <div class="field">
-        <label>YouTube Video Link (or local file)</label>
+        <label>YouTube Video Link (or Local .MP4 Path)</label>
         <input id="urlInput" type="text" placeholder="https://youtu.be/rQLEb0W7REo" value="https://youtu.be/rQLEb0W7REo" />
       </div>
       <div class="field">
@@ -240,7 +284,7 @@ def studio_index():
         <input id="topNInput" type="number" min="1" max="10" value="2" />
       </div>
       <div class="field">
-        <label>Clip Length (sec)</label>
+        <label>Clip Length</label>
         <select id="durationSelect">
           <option value="20">20 seconds</option>
           <option value="28" selected>28 seconds</option>
@@ -255,8 +299,44 @@ def studio_index():
           <option value="ai-voiceover">AI Hype Voiceover + Ducked Audio</option>
         </select>
       </div>
+      <div class="field">
+        <label>18+ Age-Gate Cookies</label>
+        <select id="cookiesBrowserSelect">
+          <option value="auto">Auto (cookies.txt / Browsers)</option>
+          <option value="cookies_txt">Saved cookies.txt</option>
+          <option value="firefox">Firefox Browser</option>
+          <option value="edge">Edge (Close Edge First)</option>
+          <option value="chrome">Chrome (Close Chrome First)</option>
+          <option value="brave">Brave (Close Brave First)</option>
+        </select>
+      </div>
       <button class="btn" id="clipBtn" onclick="runClipper()">🔥 Make My 9:16 Clips</button>
     </div>
+
+    <div class="helper-bar">
+      <button class="btn-secondary" type="button" onclick="toggleCookiesDrawer()">🔑 18+ YouTube Cookies.txt (For Age-Restricted Videos)</button>
+      <label class="btn-secondary" style="cursor:pointer;">
+        📁 Or Upload Local .MP4 From PC
+        <input type="file" id="localVideoFile" accept="video/mp4,video/x-matroska,video/webm,video/quicktime" style="display:none;" onchange="uploadLocalVideoFile(this)" />
+      </label>
+      <span id="cookiesBadge" style="font-size:0.8rem; color:var(--muted);"></span>
+    </div>
+
+    <div class="cookies-drawer" id="cookiesDrawer">
+      <p>
+        <strong style="color:var(--gold);">Why is this needed for some GTA 6 videos?</strong> YouTube marks many GTA 6 videos as <strong>18+ Age-Restricted</strong> (<em>"Sign in to confirm your age"</em>).
+        To unlock every 18+ YouTube video on Windows without closing Chrome/Edge: install the free <strong>"Get cookies.txt LOCALLY"</strong> browser extension, click Export while on YouTube.com, and upload or paste the file below:
+      </p>
+      <div style="display:flex; gap:10px; align-items:center; margin-bottom:8px; flex-wrap:wrap;">
+        <label class="btn-secondary" style="cursor:pointer;">
+          📄 Choose cookies.txt File
+          <input type="file" accept=".txt" style="display:none;" onchange="loadCookiesTxtFile(this)" />
+        </label>
+        <button class="btn-secondary" type="button" style="background:var(--pink); color:#fff; border:none;" onclick="saveCookiesTxt()">💾 Save cookies.txt</button>
+      </div>
+      <textarea id="cookiesTextarea" rows="4" placeholder="# Netscape HTTP Cookie File&#10;.youtube.com	TRUE	/	TRUE	... (Paste your exported YouTube cookies.txt here)"></textarea>
+    </div>
+
     <div id="jobStatus">⏳ Downloading video, aligning millisecond karaoke subtitles, and cropping crazy moments to 9:16 (1080x1920)...</div>
     <div id="errorBanner"></div>
   </section>
@@ -271,11 +351,68 @@ def studio_index():
         const q = data.quota;
         document.getElementById('quotaBox').innerHTML =
           `⚡ Local 9:16 Clipping: <strong>UNLIMITED (100% Free)</strong> &nbsp;|&nbsp; Auto-Upload API: <strong>${q.uploads_remaining_today}</strong>/day`;
+        const cBadge = document.getElementById('cookiesBadge');
+        if (data.has_cookies_txt) {
+          cBadge.innerHTML = '✅ <strong style="color:var(--green);">18+ YouTube cookies.txt Active</strong>';
+        } else {
+          cBadge.innerHTML = 'ℹ️ Public videos work automatically • Add cookies.txt above for 18+ age-restricted GTA 6 videos';
+        }
         renderClips(data.clips);
       } catch (err) {
         const errBox = document.getElementById('errorBanner');
         errBox.style.display = 'block';
         errBox.textContent = 'Error loading studio status: ' + err;
+      }
+    }
+
+    function toggleCookiesDrawer() {
+      const el = document.getElementById('cookiesDrawer');
+      el.style.display = el.style.display === 'block' ? 'none' : 'block';
+    }
+
+    function loadCookiesTxtFile(input) {
+      const file = input.files && input.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = async (e) => {
+        document.getElementById('cookiesTextarea').value = e.target.result;
+        await saveCookiesTxt();
+      };
+      reader.readAsText(file);
+    }
+
+    async function saveCookiesTxt() {
+      const text = document.getElementById('cookiesTextarea').value;
+      await fetch('/api/cookies', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ cookies_text: text })
+      });
+      document.getElementById('cookiesDrawer').style.display = 'none';
+      await loadDashboard();
+    }
+
+    async function uploadLocalVideoFile(input) {
+      const file = input.files && input.files[0];
+      if (!file) return;
+      const statusBox = document.getElementById('jobStatus');
+      statusBox.style.display = 'block';
+      statusBox.textContent = `⏳ Uploading local video "${file.name}" to Studio...`;
+      try {
+        const res = await fetch('/api/upload-video', {
+          method: 'POST',
+          headers: { 'X-Filename': file.name },
+          body: file
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'Upload failed');
+        document.getElementById('urlInput').value = data.local_path;
+        statusBox.textContent = `✅ Loaded "${data.filename}"! Click "🔥 Make My 9:16 Clips" to generate your Shorts.`;
+      } catch (err) {
+        const errBox = document.getElementById('errorBanner');
+        errBox.style.display = 'block';
+        errBox.textContent = 'Local file upload failed: ' + err.message;
+        statusBox.style.display = 'none';
       }
     }
 
@@ -344,6 +481,7 @@ def studio_index():
       btn.disabled = true;
       btn.textContent = '⏳ Making Clips...';
       statusBox.style.display = 'block';
+      statusBox.textContent = '⏳ Downloading video, aligning millisecond karaoke subtitles, and cropping crazy moments to 9:16 (1080x1920)...';
       errBox.style.display = 'none';
       try {
         const res = await fetch('/api/clip', {
@@ -353,18 +491,27 @@ def studio_index():
             url: document.getElementById('urlInput').value,
             top_n: parseInt(document.getElementById('topNInput').value, 10) || 2,
             clip_duration: parseFloat(document.getElementById('durationSelect').value) || 28.0,
-            audio_mode: document.getElementById('modeSelect').value
+            audio_mode: document.getElementById('modeSelect').value,
+            cookies_browser: document.getElementById('cookiesBrowserSelect').value
           })
         });
         if (!res.ok) {
           const errText = await res.text();
-          throw new Error(errText);
+          let cleanMsg = errText;
+          try {
+            const parsed = JSON.parse(errText);
+            cleanMsg = parsed.error || errText;
+          } catch (e) {}
+          throw new Error(cleanMsg);
         }
         await res.json();
         await loadDashboard();
       } catch (err) {
         errBox.style.display = 'block';
-        errBox.textContent = 'Clipping failed: ' + err.message;
+        errBox.textContent = err.message;
+        if (err.message.toLowerCase().includes('age-restricted') || err.message.toLowerCase().includes('confirm your age')) {
+          document.getElementById('cookiesDrawer').style.display = 'block';
+        }
       } finally {
         btn.disabled = false;
         btn.textContent = '🔥 Make My 9:16 Clips';
@@ -410,3 +557,4 @@ def studio_index():
 </body>
 </html>
 """
+

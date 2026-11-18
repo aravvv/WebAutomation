@@ -12,6 +12,7 @@ DOWNLOADS_DIR = STORAGE_DIR / "downloads"
 RENDERS_DIR = STORAGE_DIR / "renders"
 TEMP_DIR = STORAGE_DIR / "temp"
 DB_PATH = STORAGE_DIR / "gta6_clipper.db"
+COOKIES_FILE = STORAGE_DIR / "cookies.txt"
 PRESETS_PATH = BASE_DIR / "config" / "gta6_presets.yaml"
 
 # Ensure storage directories exist
