@@ -262,7 +262,7 @@ def studio_index():
       }
       const cacheBust = Date.now();
       grid.innerHTML = clips.map(c => {
-        const filename = c.output_path.split('/').pop();
+        const filename = c.output_path.split(/[\\/]/).pop();
         const hookOpts = (c.hook_options || [c.primary_hook]).map(h =>
           `<option value="${h.replace(/"/g, '&quot;')}" ${h === c.primary_hook ? 'selected' : ''}>${h}</option>`
         ).join('');

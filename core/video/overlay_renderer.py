@@ -119,6 +119,9 @@ class OverlayRenderer:
         where each word in a chunk lights up in bright Viral Yellow (&H0000E6FF&)
         during its spoken timestamp.
         """
+        import os
+
+        ass_font_name = "Arial Black" if os.name == "nt" else "Roboto Black"
         chunks = AudioTranscriber.group_into_karaoke_chunks(words, max_words_per_chunk=max_words_per_chunk)
         ass_header = f"""[Script Info]
 ScriptType: v4.00+
@@ -129,7 +132,7 @@ ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Karaoke,Roboto Black,68,&H00FFFFFF,&H0000E6FF,&H00000000,&H80000000,-1,0,0,0,100,100,1,0,1,6,3,2,70,70,440,1
+Style: Karaoke,{ass_font_name},68,&H00FFFFFF,&H0000E6FF,&H00000000,&H80000000,-1,0,0,0,100,100,1,0,1,6,3,2,70,70,440,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -156,7 +159,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                     events.append(f"Dialogue: 0,{start_ts},{end_ts},Karaoke,,0,0,0,,{line_text}")
 
         output_ass_path.parent.mkdir(parents=True, exist_ok=True)
-        output_ass_path.write_text(ass_header + "\n".join(events) + "\n")
+        output_ass_path.write_text(ass_header + "\n".join(events) + "\n", encoding="utf-8")
         return output_ass_path
 
     @staticmethod

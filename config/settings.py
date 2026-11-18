@@ -24,8 +24,13 @@ DEFAULT_CLIP_DURATION = 28.0
 MIN_CLIP_DURATION = 15.0
 MAX_CLIP_DURATION = 58.0
 
-# Font paths (prioritize Roboto-Black for viral Shorts look, fallback to DejaVuSans-Bold)
+# Font paths (supports both Linux and Windows system fonts)
 FONT_CANDIDATES = [
+    "C:/Windows/Fonts/arialbd.ttf",
+    "C:/Windows/Fonts/impact.ttf",
+    "C:/Windows/Fonts/segoeuib.ttf",
+    "C:/Windows/Fonts/calibrib.ttf",
+    "C:/Windows/Fonts/arial.ttf",
     "/usr/share/fonts/truetype/roboto/unhinted/RobotoTTF/Roboto-Black.ttf",
     "/usr/share/fonts/truetype/roboto/unhinted/RobotoCondensed-Bold.ttf",
     "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",

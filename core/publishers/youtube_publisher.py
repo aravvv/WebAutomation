@@ -130,6 +130,6 @@ class YouTubeShortsPublisher:
                     str(self.client_secrets_file), YOUTUBE_UPLOAD_SCOPE
                 )
                 creds = flow.run_local_server(port=0)
-            self.token_file.write_text(creds.to_json())
+            self.token_file.write_text(creds.to_json(), encoding="utf-8")
 
         return build("youtube", "v3", credentials=creds)

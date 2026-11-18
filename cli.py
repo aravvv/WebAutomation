@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 import argparse
 import json
+import sys
 from pathlib import Path
-
-import uvicorn
 
 from core.analyzer.moment_detector import CrazyMomentDetector
 from core.ingest.youtube_downloader import YouTubeDownloader
@@ -11,6 +10,11 @@ from core.publishers.quota_tracker import QuotaAndClipTracker
 from core.publishers.youtube_publisher import YouTubeShortsPublisher
 from core.video.short_compositor import ShortCompositor
 from core.video.smart_cropper import SmartPortraitCropper
+
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
 
 def cmd_clip(args: argparse.Namespace) -> None:
@@ -114,6 +118,8 @@ def cmd_list(_: argparse.Namespace) -> None:
 
 
 def cmd_dashboard(args: argparse.Namespace) -> None:
+    import uvicorn
+
     print(f"Launching GTA 6 Viral Shorts Studio Dashboard on http://localhost:{args.port} ...")
     uvicorn.run("core.review.web_dashboard:app", host="0.0.0.0", port=args.port, reload=False)
 

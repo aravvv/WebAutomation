@@ -39,7 +39,7 @@ class CrazyMomentDetector:
 
     def __init__(self, presets_path: Path = PRESETS_PATH):
         if presets_path.exists():
-            data = yaml.safe_load(presets_path.read_text()) or {}
+            data = yaml.safe_load(presets_path.read_text(encoding="utf-8")) or {}
         else:
             data = {}
         kw = data.get("hype_keywords", {})

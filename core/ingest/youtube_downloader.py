@@ -58,14 +58,19 @@ class YouTubeDownloader:
         self.download_dir.mkdir(parents=True, exist_ok=True)
 
     @staticmethod
-    def find_yt_dlp_binary() -> Optional[str]:
+    def find_yt_dlp_cmd() -> Optional[List[str]]:
         found = shutil.which("yt-dlp")
         if found:
-            return found
+            return [found]
         local_bin = Path.home() / ".local" / "bin" / "yt-dlp"
         if local_bin.exists():
-            return str(local_bin)
-        return None
+            return [str(local_bin)]
+        try:
+            import sys
+            import yt_dlp  # noqa: F401
+            return [sys.executable, "-m", "yt_dlp"]
+        except ImportError:
+            return None
 
     @staticmethod
     def extract_video_id(url_or_path: str) -> str:
@@ -92,7 +97,7 @@ class YouTubeDownloader:
             "json",
             str(video_path),
         ]
-        res = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        res = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", check=True)
         data = json.loads(res.stdout)
         stream = data.get("streams", [{}])[0]
         fmt = data.get("format", {})
@@ -116,11 +121,7 @@ class YouTubeDownloader:
         return self._download_from_youtube(url_or_path, use_demo_fallback=use_demo_fallback)
 
     def _is_yt_dlp_available(self) -> bool:
-        try:
-            import yt_dlp  # noqa: F401
-            return True
-        except ImportError:
-            return self.find_yt_dlp_binary() is not None
+        return self.find_yt_dlp_cmd() is not None
 
     def _ingest_local_file(self, file_path: Path) -> IngestedVideo:
         info = self.probe_video_stream(file_path)
@@ -130,7 +131,7 @@ class YouTubeDownloader:
         title = file_path.stem.replace("_", " ")
 
         if meta_path.exists():
-            raw_meta = json.loads(meta_path.read_text())
+            raw_meta = json.loads(meta_path.read_text(encoding="utf-8", errors="ignore"))
             title = raw_meta.get("title", title)
             for h in raw_meta.get("heatmap", []) or []:
                 heatmap.append(
@@ -170,28 +171,29 @@ class YouTubeDownloader:
         output_mp4 = self.download_dir / f"{video_id}.mp4"
         info_json_path = self.download_dir / f"{video_id}.info.json"
         offset_meta_path = self.download_dir / f"{video_id}.offset.json"
-        yt_dlp_bin = self.find_yt_dlp_binary()
+        yt_dlp_cmd = self.find_yt_dlp_cmd()
 
-        if not yt_dlp_bin:
+        if not yt_dlp_cmd:
             if use_demo_fallback:
                 return self.create_demo_gta6_landscape_video(video_id=video_id, source_url=url)
-            raise RuntimeError("yt-dlp binary not found. Install yt-dlp to download YouTube URLs.")
+            raise RuntimeError("yt-dlp not found. Run `pip install yt-dlp` to download YouTube URLs.")
+
+        js_args = ["--js-runtimes", "node"] if shutil.which("node") else []
 
         # 1. Fetch metadata JSON if not cached
         if not info_json_path.exists():
-            meta_cmd = [
-                yt_dlp_bin,
-                "--js-runtimes",
-                "node",
-                "--dump-single-json",
-                "--no-warnings",
-                url,
-            ]
-            meta_res = subprocess.run(meta_cmd, capture_output=True, text=True)
+            meta_cmd = yt_dlp_cmd + js_args + ["--dump-single-json", "--no-warnings", url]
+            meta_res = subprocess.run(
+                meta_cmd, capture_output=True, text=True, encoding="utf-8", errors="replace"
+            )
             if meta_res.returncode == 0 and meta_res.stdout.strip():
-                info_json_path.write_text(meta_res.stdout)
+                info_json_path.write_text(meta_res.stdout, encoding="utf-8")
 
-        info_dict = json.loads(info_json_path.read_text()) if info_json_path.exists() else {}
+        info_dict = (
+            json.loads(info_json_path.read_text(encoding="utf-8", errors="ignore"))
+            if info_json_path.exists()
+            else {}
+        )
         full_duration = float(info_dict.get("duration") or 0.0)
         raw_heatmap = info_dict.get("heatmap") or []
 
@@ -199,7 +201,9 @@ class YouTubeDownloader:
         section_offset = 0.0
         if offset_meta_path.exists():
             try:
-                section_offset = float(json.loads(offset_meta_path.read_text()).get("section_offset", 0.0))
+                section_offset = float(
+                    json.loads(offset_meta_path.read_text(encoding="utf-8")).get("section_offset", 0.0)
+                )
             except Exception:
                 section_offset = 0.0
         elif full_duration > 180.0 and raw_heatmap:
@@ -210,31 +214,32 @@ class YouTubeDownloader:
 
         # 3. Download video (for >180s videos, grab 120s window starting at section_offset)
         if not output_mp4.exists():
-            dl_cmd = [
-                yt_dlp_bin,
-                "--js-runtimes",
-                "node",
-                "--no-warnings",
-                "-f",
-                "bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[height<=1080][ext=mp4]/18/best",
-                "--merge-output-format",
-                "mp4",
-                "--write-subs",
-                "--write-auto-subs",
-                "--sub-langs",
-                "en.*",
-            ]
+            dl_cmd = (
+                yt_dlp_cmd
+                + js_args
+                + [
+                    "--no-warnings",
+                    "-f",
+                    "bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[height<=1080][ext=mp4]/18/best",
+                    "--merge-output-format",
+                    "mp4",
+                    "--write-subs",
+                    "--write-auto-subs",
+                    "--sub-langs",
+                    "en.*",
+                ]
+            )
             if full_duration > 180.0:
                 sec_end = min(full_duration, section_offset + 120.0)
                 dl_cmd.extend(["--download-sections", f"*{int(section_offset)}-{int(sec_end)}"])
 
             dl_cmd.extend(["-o", str(self.download_dir / f"{video_id}.%(ext)s"), url])
-            res = subprocess.run(dl_cmd, capture_output=True, text=True)
+            res = subprocess.run(dl_cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
             if res.returncode != 0 and not output_mp4.exists():
                 if use_demo_fallback:
                     return self.create_demo_gta6_landscape_video(video_id=video_id, source_url=url)
                 raise RuntimeError(f"yt-dlp failed to download {url}: {res.stderr}")
-            offset_meta_path.write_text(json.dumps({"section_offset": section_offset}))
+            offset_meta_path.write_text(json.dumps({"section_offset": section_offset}), encoding="utf-8")
 
         stream_info = self.probe_video_stream(output_mp4)
         clip_dur = stream_info["duration"]
@@ -278,7 +283,7 @@ class YouTubeDownloader:
         vtt_candidates = sorted(self.download_dir.glob(f"{video_id}*.vtt"))
         if not vtt_candidates:
             return []
-        vtt_text = vtt_candidates[0].read_text(errors="ignore")
+        vtt_text = vtt_candidates[0].read_text(encoding="utf-8", errors="ignore")
 
         def to_sec(ts: str) -> float:
             parts = [float(p) for p in ts.split(":")]
@@ -483,7 +488,7 @@ class YouTubeDownloader:
                     for s in transcript
                 ],
             }
-            meta_path.write_text(json.dumps(meta_payload, indent=2))
+            meta_path.write_text(json.dumps(meta_payload, indent=2), encoding="utf-8")
 
         return IngestedVideo(
             video_id=video_id,

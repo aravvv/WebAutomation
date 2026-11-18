@@ -111,7 +111,13 @@ class ShortCompositor:
         self.overlay_renderer.generate_karaoke_ass_subtitles(word_timings, subs_ass)
 
         # 5. Single-pass FFmpeg composite: 9:16 Crop + Scale + Hook Banner Overlay + ASS Subtitles
-        ass_escaped = str(subs_ass).replace("\\", "/").replace(":", "\\:")
+        import os
+
+        try:
+            rel_ass = os.path.relpath(subs_ass, Path.cwd()).replace("\\", "/")
+        except ValueError:
+            rel_ass = str(subs_ass).replace("\\", "/")
+        ass_escaped = rel_ass.replace(":", "\\:").replace("'", "\\'")
         filter_complex = f"[0:v]{crop_vf}[cropped];[cropped][1:v]overlay=0:0,ass='{ass_escaped}'[vout]"
 
         base_render_path = self.temp_dir / f"{clip_id}_base.mp4" if vo_audio_path else final_mp4

@@ -33,7 +33,7 @@ class ViralHookGenerator:
 
     def __init__(self, presets_path: Path = PRESETS_PATH):
         if presets_path.exists():
-            self.presets = yaml.safe_load(presets_path.read_text()) or {}
+            self.presets = yaml.safe_load(presets_path.read_text(encoding="utf-8")) or {}
         else:
             self.presets = {}
 
