@@ -4,7 +4,9 @@ __pycache__/
 *.pyc
 .pytest_cache/
 storage/downloads/
-storage/renders/
+storage/renders/*
+!storage/renders/rQLEb0W7REo_clip1_0s_original.mp4
+!storage/renders/rQLEb0W7REo_clip2_67s_original.mp4
 storage/temp/
 storage/*.db
 client_secrets.json

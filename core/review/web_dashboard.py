@@ -140,7 +140,7 @@ def download_rendered_video(filename: str):
 
 @app.get("/", response_class=HTMLResponse)
 def studio_index():
-    return """<!DOCTYPE html>
+    return r"""<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
@@ -162,7 +162,7 @@ def studio_index():
     * { box-sizing: border-box; margin: 0; padding: 0; font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif; }
     body { background: var(--bg); color: var(--text); padding: 24px; max-width: 1400px; margin: 0 auto; }
     header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 22px; padding-bottom: 16px; border-bottom: 1px solid var(--border); flex-wrap: wrap; gap: 14px; }
-    .brand h1 { font-size: 1.65rem; background: linear-gradient(90deg, var(--pink), var(--gold), var(--cyan)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-weight: 900; letter-spacing: 0.4px; }
+    .brand h1 { font-size: 1.65rem; color: var(--gold); font-weight: 900; letter-spacing: 0.4px; }
     .brand p { color: var(--muted); font-size: 0.9rem; margin-top: 4px; }
     .quota-pill { background: var(--card); border: 1px solid var(--border); padding: 10px 16px; border-radius: 12px; font-size: 0.85rem; }
     .quota-pill strong { color: var(--gold); }
@@ -180,8 +180,9 @@ def studio_index():
     .btn-secondary { background: #261f47; border: 1px solid var(--border); padding: 9px 14px; font-size: 0.82rem; border-radius: 8px; color: var(--cyan); font-weight: 700; cursor: pointer; text-decoration: none; display: inline-block; }
     .btn-publish { background: linear-gradient(90deg, #00c853, #00bfa5); width: 100%; margin-top: 12px; padding: 12px; }
 
-    /* Progress Banner */
+    /* Progress & Error Banners */
     #jobStatus { display: none; margin-top: 14px; padding: 12px 16px; border-radius: 10px; background: rgba(0, 240, 255, 0.1); border: 1px solid var(--cyan); color: var(--cyan); font-weight: 700; font-size: 0.9rem; }
+    #errorBanner { display: none; margin-top: 14px; padding: 12px 16px; border-radius: 10px; background: rgba(255, 45, 145, 0.15); border: 1px solid var(--pink); color: #ff80b5; font-weight: 700; font-size: 0.88rem; white-space: pre-wrap; }
 
     /* Clips Grid */
     .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(620px, 1fr)); gap: 22px; }
@@ -240,18 +241,25 @@ def studio_index():
       <button class="btn" id="clipBtn" onclick="runClipper()">🔥 Make My 9:16 Clips</button>
     </div>
     <div id="jobStatus">⏳ Downloading video, aligning millisecond karaoke subtitles, and cropping crazy moments to 9:16 (1080x1920)...</div>
+    <div id="errorBanner"></div>
   </section>
 
   <div class="grid" id="clipsGrid"></div>
 
   <script>
     async function loadDashboard() {
-      const res = await fetch('/api/status');
-      const data = await res.json();
-      const q = data.quota;
-      document.getElementById('quotaBox').innerHTML =
-        `YouTube Free Daily Quota: <strong>${q.remaining_units} / ${q.daily_limit}</strong> units left (<strong>${q.uploads_remaining_today}</strong> free Shorts uploads available today)`;
-      renderClips(data.clips);
+      try {
+        const res = await fetch('/api/status');
+        const data = await res.json();
+        const q = data.quota;
+        document.getElementById('quotaBox').innerHTML =
+          `YouTube Free Daily Quota: <strong>${q.remaining_units} / ${q.daily_limit}</strong> units left (<strong>${q.uploads_remaining_today}</strong> free Shorts uploads available today)`;
+        renderClips(data.clips);
+      } catch (err) {
+        const errBox = document.getElementById('errorBanner');
+        errBox.style.display = 'block';
+        errBox.textContent = 'Error loading studio status: ' + err;
+      }
     }
 
     function renderClips(clips) {
@@ -262,7 +270,7 @@ def studio_index():
       }
       const cacheBust = Date.now();
       grid.innerHTML = clips.map(c => {
-        const filename = c.output_path.split(/[\\/]/).pop();
+        const filename = c.filename || c.output_path.split(/[\\/]/).pop();
         const hookOpts = (c.hook_options || [c.primary_hook]).map(h =>
           `<option value="${h.replace(/"/g, '&quot;')}" ${h === c.primary_hook ? 'selected' : ''}>${h}</option>`
         ).join('');
@@ -315,9 +323,11 @@ def studio_index():
     async function runClipper() {
       const btn = document.getElementById('clipBtn');
       const statusBox = document.getElementById('jobStatus');
+      const errBox = document.getElementById('errorBanner');
       btn.disabled = true;
       btn.textContent = '⏳ Making Clips...';
       statusBox.style.display = 'block';
+      errBox.style.display = 'none';
       try {
         const res = await fetch('/api/clip', {
           method: 'POST',
@@ -329,8 +339,15 @@ def studio_index():
             audio_mode: document.getElementById('modeSelect').value
           })
         });
+        if (!res.ok) {
+          const errText = await res.text();
+          throw new Error(errText);
+        }
         await res.json();
         await loadDashboard();
+      } catch (err) {
+        errBox.style.display = 'block';
+        errBox.textContent = 'Clipping failed: ' + err.message;
       } finally {
         btn.disabled = false;
         btn.textContent = '🔥 Make My 9:16 Clips';

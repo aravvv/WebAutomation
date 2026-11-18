@@ -118,9 +118,16 @@ def cmd_list(_: argparse.Namespace) -> None:
 
 
 def cmd_dashboard(args: argparse.Namespace) -> None:
+    import threading
+    import webbrowser
     import uvicorn
 
-    print(f"Launching GTA 6 Viral Shorts Studio Dashboard on http://localhost:{args.port} ...")
+    url = f"http://127.0.0.1:{args.port}"
+    print(f"\n==========================================================")
+    print(f" 🚀 GTA 6 Viral Shorts Studio Dashboard Running!")
+    print(f" 🌐 Open in your browser: {url}")
+    print(f"==========================================================\n")
+    threading.Timer(1.2, lambda: webbrowser.open(url)).start()
     uvicorn.run("core.review.web_dashboard:app", host="0.0.0.0", port=args.port, reload=False)
 
 
